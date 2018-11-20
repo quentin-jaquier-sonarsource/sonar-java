@@ -36,6 +36,7 @@ import org.sonar.check.Rule;
 import org.sonar.java.cfg.CFG;
 import org.sonar.plugins.java.api.IssuableSubscriptionVisitor;
 import org.sonar.plugins.java.api.semantic.Symbol;
+import org.sonar.plugins.java.api.tree.ArrayAccessExpressionTree;
 import org.sonar.plugins.java.api.tree.AssignmentExpressionTree;
 import org.sonar.plugins.java.api.tree.BinaryExpressionTree;
 import org.sonar.plugins.java.api.tree.ExpressionTree;
@@ -82,7 +83,7 @@ public class NullDereferenceBeliefStyleCheck extends IssuableSubscriptionVisitor
     if(element.rightOperand().is(Tree.Kind.NULL_LITERAL) && element.leftOperand().is(Tree.Kind.IDENTIFIER)) {
       IdentifierTree id = (IdentifierTree) element.leftOperand();
       if(out.contains(id.symbol())) {
-        reportIssue(id, "Null possible");
+        reportIssue(id, "This check is either always false, or a null pointer has been raised before.");
       }
     }
   }
@@ -166,11 +167,14 @@ public class NullDereferenceBeliefStyleCheck extends IssuableSubscriptionVisitor
           case ASSIGNMENT:
             processAssignment((AssignmentExpressionTree) element, blockKill, blockGen);
             break;
-          case MEMBER_SELECT:
-            processPointerUse(element, blockGen);
-            break;
           case METHOD_INVOCATION:
             processMethodInvocation((MethodInvocationTree) element, blockGen);
+            break;
+          case MEMBER_SELECT:
+            processPointerUse(((MemberSelectExpressionTree) element).expression(), blockGen);
+            break;
+          case ARRAY_ACCESS_EXPRESSION:
+            processPointerUse(((ArrayAccessExpressionTree) element).expression(), blockGen);
             break;
           case VARIABLE:
             processVariable((VariableTree) element, blockKill, blockGen);
@@ -195,7 +199,13 @@ public class NullDereferenceBeliefStyleCheck extends IssuableSubscriptionVisitor
 
     private void processPointerUse(Tree element, Set<Symbol> blockGen) {
       if(element.is(Tree.Kind.IDENTIFIER)) {
-        blockGen.add(((IdentifierTree) element).symbol());
+        Symbol symbol = ((IdentifierTree)element).symbol();
+        if(symbol == null || symbol.owner() == null || symbol.owner().type() == null){
+          return;
+        }
+        if(!symbol.owner().type().isClass()){
+          blockGen.add(symbol);
+        }
       }
     }
 
@@ -203,9 +213,14 @@ public class NullDereferenceBeliefStyleCheck extends IssuableSubscriptionVisitor
       ExpressionTree lhs = element.variable();
       if (lhs.is(Tree.Kind.IDENTIFIER)) {
         Symbol symbol = ((IdentifierTree) lhs).symbol();
-        //if we see an assignment, we remove all previously used  pointer (we don't know anything for them anymore)
-        blockKill.add(symbol);
-        blockGen.remove(symbol);
+        if(symbol == null || symbol.owner() == null || symbol.owner().type() == null){
+          return;
+        }
+        if(!symbol.owner().type().isClass()) {
+          //if we see an assignment, we remove all previously used  pointer (we don't know anything for them anymore)
+          blockKill.add(symbol);
+          blockGen.remove(symbol);
+        }
       }
     }
   }
